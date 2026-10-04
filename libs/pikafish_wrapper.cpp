@@ -2,12 +2,14 @@
 #include <sstream>
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include <unistd.h>
 #include "engine.h"
 #include "attacks.h"
 #include "position.h"
 #include "search.h"
 #include "tt.h"
+#include "types.h"
 
 using namespace Stockfish;
 
@@ -28,11 +30,8 @@ extern "C" const char* pf_bestmove(const char* fen, int movetime_ms) {
         Attacks::init();
         logMsg("初始化完成");
         
-        // 只创建一次 Engine 对象
         if (!g_engine) {
             logMsg("创建 Engine 对象");
-            // Engine 构造函数需要参数，我们看情况
-            // 先试无参构造
             g_engine = new Engine();
             logMsg("Engine 创建成功");
         }
@@ -48,7 +47,7 @@ extern "C" const char* pf_bestmove(const char* fen, int movetime_ms) {
         test.close();
         
         logMsg("加载 NNUE");
-        g_engine->load_network(nnuePath);
+        g_engine->load_network(std::filesystem::path(nnuePath));
         logMsg("NNUE 加载完成");
         
         logMsg("设置局面");
@@ -56,7 +55,10 @@ extern "C" const char* pf_bestmove(const char* fen, int movetime_ms) {
         if (fenStr.find(" - - ") == std::string::npos) {
             fenStr += " - - 0 1";
         }
-        auto err = g_engine->set_position(fenStr);
+        
+        // 传空走法列表
+        std::vector<Move> emptyMoves;
+        auto err = g_engine->set_position(fenStr, emptyMoves);
         if (err.has_value()) {
             logMsg("set_position 失败");
             g_result = "ERR_POS";
