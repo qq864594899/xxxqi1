@@ -1,90 +1,107 @@
 #include <string>
 #include <sstream>
 #include <iostream>
+#include <utility>
 #include <fstream>
-#include <vector>
-#include <filesystem>
 #include <unistd.h>
 #include "engine.h"
-#include "attacks.h"
 #include "position.h"
-#include "search.h"
+#include "thread.h"
 #include "tt.h"
-#include "types.h"
+#include "bitboards.h"
+#include "search.h"
 
 using namespace Stockfish;
 
+// ===== 全局变量，让回调能改到 =====
+static std::string g_result;
+static bool g_inited = false;
+
+// ===== 日志 =====
 static void logMsg(const char* msg) {
     std::ofstream f("/var/mobile/Containers/Data/Application/8E8A56AB-971B-4CF3-85F4-6F2A380D26B7/Documents/pf_debug.txt", std::ios::app);
     if (f.is_open()) f << msg << std::endl;
 }
-
-static std::string g_result;
-static Engine* g_engine = nullptr;
 
 extern "C" const char* pf_bestmove(const char* fen, int movetime_ms) {
     g_result = "NONE";
     logMsg("=== 开始 ===");
     
     try {
-        logMsg("初始化 Attacks");
-        Attacks::init();
-        logMsg("初始化完成");
-        
-        if (!g_engine) {
-            logMsg("创建 Engine 对象");
-            g_engine = new Engine();
-            logMsg("Engine 创建成功");
+        // ===== 初始化 =====
+        if (!g_inited) {
+            logMsg("初始化 Attacks");
+            Bitboards::init();
+            logMsg("初始化 Position");
+            Position::init();
+            logMsg("初始化 Threads");
+            Threads.init();
+            logMsg("初始化 TT");
+            TT.resize(16);
+            g_inited = true;
+            logMsg("初始化完成");
         }
         
+        // ===== 检查 NNUE =====
         logMsg("检查 NNUE");
         std::string nnuePath = "/var/mobile/Containers/Data/Application/8E8A56AB-971B-4CF3-85F4-6F2A380D26B7/Documents/pikafish.nnue";
         std::ifstream test(nnuePath);
         if (!test.good()) {
             logMsg("NNUE 不存在");
-            g_result = "NO_NNUE";
-            return g_result.c_str();
+            return "NO_NNUE";
         }
         test.close();
         
+        // ===== 加载 NNUE =====
         logMsg("加载 NNUE");
-        g_engine->load_network(std::filesystem::path(nnuePath));
+        Engine::load_network(std::filesystem::path(nnuePath));
         logMsg("NNUE 加载完成");
         
+        // ===== 设置回调（写全局变量） =====
+        logMsg("设置回调");
+        Engine::set_on_bestmove([](std::string_view bm, std::string_view ponder) {
+            g_result = std::string(bm);
+            logMsg(("回调触发！bestmove: " + g_result).c_str());
+        });
+        
+        // ===== 设置局面 =====
         logMsg("设置局面");
         std::string fenStr(fen);
         if (fenStr.find(" - - ") == std::string::npos) {
             fenStr += " - - 0 1";
         }
-        
-        std::vector<std::string> emptyMoves;
-        auto err = g_engine->set_position(fenStr, emptyMoves);
+        auto err = Engine::set_position(fenStr);
         if (err.has_value()) {
             logMsg("set_position 失败");
-            g_result = "ERR_POS";
-            return g_result.c_str();
+            return "ERR_POS";
         }
         logMsg("局面设置完成");
         
-        logMsg("设置回调");
-        g_engine->set_on_bestmove([](std::string_view bm, std::string_view ponder) {
-            g_result = std::string(bm);
-            logMsg(("bestmove: " + g_result).c_str());
-        });
-        
+        // ===== 清空搜索 =====
         logMsg("清空搜索");
-        g_engine->search_clear();
+        Engine::search_clear();
         
-        logMsg("引擎状态就绪");
+        // ===== 启动搜索 =====
+        logMsg("启动搜索");
+        Search::LimitsType limits;
+        limits.movetime = movetime_ms;
+        Threads.start_thinking(limits);
+        
+        // ===== 等待搜索完成 =====
+        logMsg("等待搜索完成");
+        usleep((movetime_ms + 1000) * 1000);
+        Threads.main()->wait_for_search_finished();
+        logMsg("搜索完成");
+        
+        logMsg(("结果: " + g_result).c_str());
         
     } catch (const std::exception& e) {
         logMsg(("异常: " + std::string(e.what())).c_str());
-        g_result = "EXCEPTION";
+        return "EXCEPTION";
     } catch (...) {
         logMsg("未知异常");
-        g_result = "UNKNOWN";
+        return "UNKNOWN";
     }
     
-    logMsg(("结果: " + g_result).c_str());
     return g_result.c_str();
 }
