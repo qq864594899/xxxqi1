@@ -20,7 +20,7 @@ jobs:
           cd /tmp/Pikafish/src
           curl -L -o pikafish.nnue https://github.com/official-pikafish/Pikafish/raw/master/src/pikafish.nnue
 
-      - name: Patch types.h
+      - name: Patch types.h for __int128
         run: |
           cd /tmp/Pikafish/src
           printf '#define __SIZEOF_INT128__ 16\nusing u128 = unsigned __int128;\n' > /tmp/h.txt
@@ -33,10 +33,8 @@ jobs:
           cd /tmp/Pikafish/src
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "SDK = $SDK"
-          # 强制用 iOS SDK 编译
           sed -i.bak "s|^CXXFLAGS = |CXXFLAGS = -arch arm64 -isysroot $SDK -mios-version-min=15.0 |" Makefile
           sed -i.bak "s|^LDFLAGS = |LDFLAGS = -arch arm64 -isysroot $SDK -mios-version-min=15.0 |" Makefile
-          grep -n "CXXFLAGS\|LDFLAGS" Makefile | head -5
           make -j4 build ARCH=apple-silicon
           ar rcs libpikafish.a *.o
           ls -la libpikafish.a
@@ -49,7 +47,10 @@ jobs:
           cp /tmp/Pikafish/src/*.h libs/
           cp -r /tmp/Pikafish/src/nnue libs/
           cp /tmp/Pikafish/src/pikafish.nnue libs/
+          echo "=== libs 目录 ==="
           ls libs/
+          echo "=== libs/nnue 目录 ==="
+          ls libs/nnue/ | head -10
 
       - name: Precompile wrapper
         run: |
