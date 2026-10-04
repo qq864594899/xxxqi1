@@ -8,7 +8,7 @@
 #include "position.h"
 #include "thread.h"
 #include "tt.h"
-#include "bitboards.h"
+#include "bitboard.h"
 #include "search.h"
 
 using namespace Stockfish;
