@@ -1,6 +1,7 @@
 #include <string>
 #include <sstream>
 #include <iostream>
+#include <utility>
 #include "uci.h"
 #include "misc.h"
 
@@ -21,7 +22,7 @@ extern "C" const char* pf_bestmove(const char* fen, int movetime_ms) {
     int fake_argc = 1;
     char* fake_argv[] = {(char*)"pikafish", NULL};
     CommandLine cli(fake_argc, fake_argv);
-    UCIEngine engine(cli);
+    UCIEngine engine(std::move(cli));
     engine.loop();
     
     std::cin.rdbuf(oldCin);
