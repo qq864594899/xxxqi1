@@ -20,6 +20,14 @@ jobs:
           cd /tmp/Pikafish/src
           curl -L -o pikafish.nnue https://github.com/official-pikafish/Pikafish/raw/master/src/pikafish.nnue
 
+      - name: Patch types.h for u128
+        run: |
+          cd /tmp/Pikafish/src
+          grep -n "u128" types.h | head -5
+          # 强制定义 u128
+          sed -i.bak 's/^using u128 = .*/using u128 = unsigned __int128;/' types.h
+          grep -n "using u128" types.h
+
       - name: Build Pikafish static lib
         run: |
           cd /tmp/Pikafish/src
@@ -35,17 +43,13 @@ jobs:
           cp /tmp/Pikafish/src/pikafish.nnue libs/
           ls -la libs/
 
-      - name: Precompile wrapper (native macOS clang)
+      - name: Precompile wrapper
         run: |
           cd libs
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           clang++ -c pikafish_wrapper.cpp -o pikafish_wrapper.o \
-            -I. -std=c++17 \
-            -arch arm64 \
-            -isysroot "$SDK" \
-            -mios-version-min=15.0 \
-            -fPIC \
-            -DNDEBUG
+            -I. -std=c++17 -arch arm64 -isysroot "$SDK" \
+            -mios-version-min=15.0 -fPIC -DNDEBUG
           ls -la pikafish_wrapper.o
 
       - name: Copy NNUE into layout
