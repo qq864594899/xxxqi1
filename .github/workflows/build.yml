@@ -23,7 +23,9 @@ jobs:
       - name: Patch types.h for __int128
         run: |
           cd /tmp/Pikafish/src
-          sed -i.bak '1i #define __SIZEOF_INT128__ 16' types.h
+          echo '#define __SIZEOF_INT128__ 16' > /tmp/header.txt
+          cat /tmp/header.txt types.h > types.h.new
+          mv types.h.new types.h
           head -3 types.h
           grep -n "u128" types.h | head -5
 
