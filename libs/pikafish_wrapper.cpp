@@ -12,15 +12,21 @@ extern "C" const char* pf_bestmove(const char* fen, int movetime_ms) {
     input += "setoption name EvalFile value /var/mobile/xiangqiassist/pikafish.nnue\n";
     input += "position fen " + std::string(fen) + " - - 0 1\n";
     input += "go movetime " + std::to_string(movetime_ms) + "\n";
+    
     std::istringstream in(input);
     std::ostringstream out;
     std::streambuf* oldCin = std::cin.rdbuf(in.rdbuf());
     std::streambuf* oldCout = std::cout.rdbuf(out.rdbuf());
-    CommandLine cli;
+    
+    int fake_argc = 1;
+    char* fake_argv[] = {(char*)"pikafish", NULL};
+    CommandLine cli(fake_argc, fake_argv);
     UCIEngine engine(cli);
     engine.loop();
+    
     std::cin.rdbuf(oldCin);
     std::cout.rdbuf(oldCout);
+    
     std::string s = out.str();
     size_t p = s.find("bestmove ");
     if (p != std::string::npos) {
