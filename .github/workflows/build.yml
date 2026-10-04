@@ -20,26 +20,16 @@ jobs:
           cd /tmp/Pikafish/src
           curl -L -o pikafish.nnue https://github.com/official-pikafish/Pikafish/raw/master/src/pikafish.nnue
 
-      - name: Inspect types.h
+      - name: Patch types.h
         run: |
           cd /tmp/Pikafish/src
-          echo "=== types.h 115-130 行 ==="
-          sed -n '115,130p' types.h
-          echo "=== grep u128 ==="
-          grep -n "u128" types.h
-          echo "=== grep int128 ==="
-          grep -n "int128" types.h
-          echo "=== grep SIZEOF ==="
-          grep -n "SIZEOF" types.h
-
-      - name: Patch types.h for __int128
-        run: |
-          cd /tmp/Pikafish/src
-          # 在文件开头加 __SIZEOF_INT128__ 定义
-          printf '#define __SIZEOF_INT128__ 16\n' > /tmp/h.txt
+          printf '#define __SIZEOF_INT128__ 16\nusing u128 = unsigned __int128;\n' > /tmp/h.txt
           cat /tmp/h.txt types.h > types.h.new
           mv types.h.new types.h
-          head -5 types.h
+          echo "=== 修改后 types.h 1-10 行 ==="
+          head -10 types.h
+          echo "=== grep u128 ==="
+          grep -n "u128" types.h
 
       - name: Build Pikafish static lib
         run: |
@@ -81,5 +71,4 @@ jobs:
         with:
           name: tweak-deb
           path: packages/*.deb
-
           
