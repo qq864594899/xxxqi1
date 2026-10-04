@@ -38,7 +38,7 @@ extern "C" const char* pf_bestmove(const char* fen, int movetime_ms) {
         }
         
         logMsg("检查 NNUE");
-        std::string nnuePath = "/var/mobile/xiangqiassist/pikafish.nnue";
+        std::string nnuePath = "/var/mobile/Containers/Data/Application/8E8A56AB-971B-4CF3-85F4-6F2A380D26B7/Documents/pikafish.nnue";
         std::ifstream test(nnuePath);
         if (!test.good()) {
             logMsg("NNUE 不存在");
