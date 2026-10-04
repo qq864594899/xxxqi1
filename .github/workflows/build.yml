@@ -28,12 +28,19 @@ jobs:
           mv types.h.new types.h
           head -5 types.h
 
-      - name: Build Pikafish static lib
+      - name: Build Pikafish static lib (iOS)
         run: |
           cd /tmp/Pikafish/src
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "SDK = $SDK"
+          # 强制用 iOS SDK 编译
+          sed -i.bak "s|^CXXFLAGS = |CXXFLAGS = -arch arm64 -isysroot $SDK -mios-version-min=15.0 |" Makefile
+          sed -i.bak "s|^LDFLAGS = |LDFLAGS = -arch arm64 -isysroot $SDK -mios-version-min=15.0 |" Makefile
+          grep -n "CXXFLAGS\|LDFLAGS" Makefile | head -5
           make -j4 build ARCH=apple-silicon
           ar rcs libpikafish.a *.o
           ls -la libpikafish.a
+          file attacks.o
 
       - name: Copy libs into repo
         run: |
@@ -42,12 +49,7 @@ jobs:
           cp /tmp/Pikafish/src/*.h libs/
           cp -r /tmp/Pikafish/src/nnue libs/
           cp /tmp/Pikafish/src/pikafish.nnue libs/
-          echo "=== libs 根目录 ==="
           ls libs/
-          echo "=== libs/nnue ==="
-          ls libs/nnue/
-          echo "=== libs/nnue/features ==="
-          ls libs/nnue/features/ | head -10
 
       - name: Precompile wrapper
         run: |
