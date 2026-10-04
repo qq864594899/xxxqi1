@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <filesystem>
 #include <unistd.h>
 #include "engine.h"
 #include "attacks.h"
@@ -56,8 +57,7 @@ extern "C" const char* pf_bestmove(const char* fen, int movetime_ms) {
             fenStr += " - - 0 1";
         }
         
-        // 传空走法列表
-        std::vector<Move> emptyMoves;
+        std::vector<std::string> emptyMoves;
         auto err = g_engine->set_position(fenStr, emptyMoves);
         if (err.has_value()) {
             logMsg("set_position 失败");
