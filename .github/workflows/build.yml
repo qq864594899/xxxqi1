@@ -26,10 +26,7 @@ jobs:
           printf '#define __SIZEOF_INT128__ 16\nusing u128 = unsigned __int128;\n' > /tmp/h.txt
           cat /tmp/h.txt types.h > types.h.new
           mv types.h.new types.h
-          echo "=== 修改后 types.h 1-10 行 ==="
-          head -10 types.h
-          echo "=== grep u128 ==="
-          grep -n "u128" types.h
+          head -5 types.h
 
       - name: Build Pikafish static lib
         run: |
@@ -43,8 +40,14 @@ jobs:
           mkdir -p libs
           cp /tmp/Pikafish/src/libpikafish.a libs/
           cp /tmp/Pikafish/src/*.h libs/
+          cp -r /tmp/Pikafish/src/nnue libs/
           cp /tmp/Pikafish/src/pikafish.nnue libs/
-          ls -la libs/
+          echo "=== libs 根目录 ==="
+          ls libs/
+          echo "=== libs/nnue ==="
+          ls libs/nnue/
+          echo "=== libs/nnue/features ==="
+          ls libs/nnue/features/ | head -10
 
       - name: Precompile wrapper
         run: |
@@ -71,4 +74,3 @@ jobs:
         with:
           name: tweak-deb
           path: packages/*.deb
-          
