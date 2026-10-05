@@ -18,25 +18,23 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/official-pikafish/Pikafish.git /tmp/Pikafish
           cd /tmp/Pikafish/src
-          curl -L -o pikafish.nnue https://github.com/official-pikafish/Pikafish/raw/master/src/pikafish.nnue
 
-      - name: Patch types.h for __int128
+      - name: Download NNUE
         run: |
           cd /tmp/Pikafish/src
-          printf '#define __SIZEOF_INT128__ 16\nusing u128 = unsigned __int128;\n' > /tmp/h.txt
-          cat /tmp/h.txt types.h > types.h.new
-          mv types.h.new types.h
-          head -5 types.h
+          curl -L -o pikafish.nnue https://github.com/official-pikafish/Networks/releases/download/master-net/pikafish.nnue
+          ls -la pikafish.nnue
 
       - name: Build Pikafish static lib (iOS)
         run: |
           cd /tmp/Pikafish/src
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "SDK = $SDK"
-          sed -i.bak "s|^CXXFLAGS = |CXXFLAGS = -arch arm64 -isysroot $SDK -mios-version-min=15.0 |" Makefile
-          sed -i.bak "s|^LDFLAGS = |LDFLAGS = -arch arm64 -isysroot $SDK -mios-version-min=15.0 |" Makefile
-          make -j4 build ARCH=apple-silicon
-          ar rcs libpikafish.a *.o
+          make -j4 build ARCH=armv8 COMP=clang \
+            CXX="xcrun -sdk iphoneos clang++" \
+            CXXFLAGS="-arch arm64 -isysroot $SDK -mios-version-min=15.0 -std=c++17 -DNDEBUG" \
+            LDFLAGS="-arch arm64 -isysroot $SDK -mios-version-min=15.0"
+          ar rcs libpikafish.a $(ls *.o | grep -v main.o)
           ls -la libpikafish.a
           file attacks.o
 
@@ -49,8 +47,6 @@ jobs:
           cp /tmp/Pikafish/src/pikafish.nnue libs/
           echo "=== libs 目录 ==="
           ls libs/
-          echo "=== libs/nnue 目录 ==="
-          ls libs/nnue/ | head -10
 
       - name: Precompile wrapper
         run: |
@@ -58,8 +54,7 @@ jobs:
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           clang++ -c pikafish_wrapper.cpp -o pikafish_wrapper.o \
             -I. -std=c++17 -arch arm64 -isysroot "$SDK" \
-            -mios-version-min=15.0 -fPIC -DNDEBUG \
-            -D__SIZEOF_INT128__=16
+            -mios-version-min=15.0 -fPIC -DNDEBUG
           ls -la pikafish_wrapper.o
 
       - name: Copy NNUE into layout
