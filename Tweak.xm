@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 static BOOL started = NO;
-
+extern char **environ;
 // ========== 日志 ==========
 static void writeLog(NSString *msg) {
     NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/xiangqi_log.txt"];
@@ -78,7 +78,8 @@ static NSString *scanFenFromMemory(void) {
                     if (!found) break;
 
                     char *fp = (char *)found;
-                    char *nul = memchr(fp, 0, end - fp);
+            
+                    char *nul = (char *)memchr(fp, 0, end - fp);
                     size_t len = nul ? (size_t)(nul - fp) : (size_t)(end - fp);
 
                     if (len > 20 && len < 2000) {
