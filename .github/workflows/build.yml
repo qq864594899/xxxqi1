@@ -32,26 +32,17 @@ jobs:
           import re
           with open('types.h', 'r') as f:
               content = f.read()
-
-          # 把条件编译的 u128/i128 定义替换为无条件定义
           pattern = r'#if defined\(__SIZEOF_INT128__\)\s*\n__extension__ using u128 = unsigned __int128;\s*\n__extension__ using i128 = signed __int128;\s*\n#elif defined\(_MSC_VER\)\s*\nusing u128 = std::_Unsigned128;\s*\nusing i128 = std::_Signed128;\s*\n#endif'
           replacement = 'using u128 = unsigned __int128;\nusing i128 = signed __int128;'
           new_content = re.sub(pattern, replacement, content)
-
           if new_content == content:
-              # 如果正则没匹配到，直接在文件开头插入
-              print("正则未匹配，使用插入方式")
               new_content = 'using u128 = unsigned __int128;\nusing i128 = signed __int128;\n' + content
-
           with open('types.h', 'w') as f:
               f.write(new_content)
           EOF
-          echo "=== types.h 前 20 行 ==="
-          head -20 types.h
-          echo "=== 检查 u128 ==="
           grep -n "u128" types.h | head -5
 
-      - name: Build Pikafish static lib (iOS)
+      - name: Build Pikafish executable (iOS)
         run: |
           cd /tmp/Pikafish/src
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
@@ -60,33 +51,16 @@ jobs:
             CXX="xcrun -sdk iphoneos clang++" \
             CXXFLAGS="-arch arm64 -isysroot $SDK -mios-version-min=15.0 -std=c++17 -DNDEBUG" \
             LDFLAGS="-arch arm64 -isysroot $SDK -mios-version-min=15.0"
-          ar rcs libpikafish.a $(ls *.o | grep -v main.o)
-          ls -la libpikafish.a
-          file attacks.o
+          ls -la pikafish
+          file pikafish
 
-      - name: Copy libs into repo
-        run: |
-          mkdir -p libs
-          cp /tmp/Pikafish/src/libpikafish.a libs/
-          cp /tmp/Pikafish/src/*.h libs/
-          cp -r /tmp/Pikafish/src/nnue libs/
-          cp /tmp/Pikafish/src/pikafish.nnue libs/
-          echo "=== libs 目录 ==="
-          ls libs/
-
-      - name: Precompile wrapper
-        run: |
-          cd libs
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          clang++ -c pikafish_wrapper.cpp -o pikafish_wrapper.o \
-            -I. -std=c++17 -arch arm64 -isysroot "$SDK" \
-            -mios-version-min=15.0 -fPIC -DNDEBUG -fno-exceptions
-          ls -la pikafish_wrapper.o
-
-      - name: Copy NNUE into layout
+      - name: Copy binaries into layout
         run: |
           mkdir -p layout/var/mobile/xiangqiassist
+          cp /tmp/Pikafish/src/pikafish layout/var/mobile/xiangqiassist/
           cp /tmp/Pikafish/src/pikafish.nnue layout/var/mobile/xiangqiassist/
+          chmod +x layout/var/mobile/xiangqiassist/pikafish
+          echo "=== layout 目录 ==="
           ls -la layout/var/mobile/xiangqiassist/
 
       - name: Build Tweak
