@@ -9,7 +9,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-static BOOL started = NO;
 
 // ========== 日志 ==========
 static void writeLog(NSString *msg) {
