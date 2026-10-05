@@ -38,11 +38,16 @@ jobs:
           ls -la pikafish
           file pikafish
 
-      - name: Copy binaries into layout
+      - name: Upload NNUE as separate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pikafish-nnue
+          path: /tmp/Pikafish/src/pikafish.nnue
+
+      - name: Copy pikafish binary into layout
         run: |
           mkdir -p layout/var/mobile/xiangqiassist
           cp /tmp/Pikafish/src/pikafish layout/var/mobile/xiangqiassist/
-          cp /tmp/Pikafish/src/pikafish.nnue layout/var/mobile/xiangqiassist/
           chmod +x layout/var/mobile/xiangqiassist/pikafish
           echo "=== layout 目录 ==="
           find layout -type f
@@ -52,6 +57,7 @@ jobs:
           make package THEOS_PACKAGE_SCHEME=rootless
           echo "=== deb 内容 ==="
           dpkg-deb -c packages/*.deb | grep xiangqiassist || echo "!!! deb 里没有 xiangqiassist !!!"
+          ls -lh packages/*.deb
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
