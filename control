@@ -1,9 +1,9 @@
-Package: com.yourname.xiangqiassist
+Package: com.admin.xiangqiassist
 Name: XiangqiAssist
-Version: 1.0
-Architecture: iphoneos-arm64
-Description: Xiangqi assist tool
-Maintainer: yourname
-Author: yourname
+Version: 0.0.1
+Architecture: iphoneos-arm
+Description: 中国象棋辅助
+Maintainer: ces
+Author: ces
 Section: Tweaks
 Depends: mobilesubstrate
