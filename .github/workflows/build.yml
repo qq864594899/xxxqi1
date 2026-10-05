@@ -17,7 +17,6 @@ jobs:
       - name: Clone Pikafish
         run: |
           git clone --depth 1 https://github.com/official-pikafish/Pikafish.git /tmp/Pikafish
-          cd /tmp/Pikafish/src
 
       - name: Download NNUE
         run: |
@@ -25,32 +24,15 @@ jobs:
           curl -L -o pikafish.nnue https://github.com/official-pikafish/Networks/releases/download/master-net/pikafish.nnue
           ls -la pikafish.nnue
 
-      - name: Patch types.h for __int128
-        run: |
-          cd /tmp/Pikafish/src
-          python3 - <<'EOF'
-          import re
-          with open('types.h', 'r') as f:
-              content = f.read()
-          pattern = r'#if defined\(__SIZEOF_INT128__\)\s*\n__extension__ using u128 = unsigned __int128;\s*\n__extension__ using i128 = signed __int128;\s*\n#elif defined\(_MSC_VER\)\s*\nusing u128 = std::_Unsigned128;\s*\nusing i128 = std::_Signed128;\s*\n#endif'
-          replacement = 'using u128 = unsigned __int128;\nusing i128 = signed __int128;'
-          new_content = re.sub(pattern, replacement, content)
-          if new_content == content:
-              new_content = 'using u128 = unsigned __int128;\nusing i128 = signed __int128;\n' + content
-          with open('types.h', 'w') as f:
-              f.write(new_content)
-          EOF
-          grep -n "u128" types.h | head -5
-
-      - name: Build Pikafish executable (iOS)
+      - name: Build Pikafish for iOS arm64
         run: |
           cd /tmp/Pikafish/src
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          CLANGXX=$(xcrun -sdk iphoneos -f clang++)
           echo "SDK = $SDK"
+          echo "CLANGXX = $CLANGXX"
           make -j4 build ARCH=armv8 COMP=clang \
-            CXX="xcrun -sdk iphoneos clang++" \
-            CXXFLAGS="-arch arm64 -isysroot $SDK -mios-version-min=15.0 -std=c++17 -DNDEBUG" \
-            LDFLAGS="-arch arm64 -isysroot $SDK -mios-version-min=15.0"
+            CXX="$CLANGXX -arch arm64 -isysroot $SDK -mios-version-min=15.0"
           ls -la pikafish
           file pikafish
 
@@ -61,11 +43,13 @@ jobs:
           cp /tmp/Pikafish/src/pikafish.nnue layout/var/mobile/xiangqiassist/
           chmod +x layout/var/mobile/xiangqiassist/pikafish
           echo "=== layout 目录 ==="
-          ls -la layout/var/mobile/xiangqiassist/
+          find layout -type f
 
       - name: Build Tweak
         run: |
           make package THEOS_PACKAGE_SCHEME=rootless
+          echo "=== deb 内容 ==="
+          dpkg-deb -c packages/*.deb | grep xiangqiassist || echo "!!! deb 里没有 xiangqiassist !!!"
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
