@@ -1,14 +1,18 @@
 #import <UIKit/UIKit.h>
-#import <CoreML/CoreML.h>
+#import <mach/mach.h>
+#import <mach/vm_region.h>
+#import <string.h>
+#import <stdlib.h>
 
 extern "C" const char* pf_bestmove(const char* fen, int movetime_ms);
 
 static BOOL started = NO;
-static MLModel *gModel = nil;
 
+// ========== 日志 ==========
 static void writeLog(NSString *msg) {
     NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/xiangqi_log.txt"];
     NSString *line = [NSString stringWithFormat:@"%@\n", msg];
+    NSLog(@"[XQ] %@", msg);
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
     if (!fh) {
         [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
@@ -19,6 +23,7 @@ static void writeLog(NSString *msg) {
     }
 }
 
+// ========== 窗口 ==========
 static UIWindow *getAnyWindow(void) {
     for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
         if ([scene isKindOfClass:[UIWindowScene class]]) {
@@ -30,313 +35,153 @@ static UIWindow *getAnyWindow(void) {
     return nil;
 }
 
-static UIImage *captureScreenImpl(void) {
-    UIWindow *window = getAnyWindow();
-    if (!window) return nil;
-    UIGraphicsBeginImageContextWithOptions(window.bounds.size, NO, 0);
-    [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:NO];
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
-}
+// ========== 内存扫描找 FEN ==========
+static NSString *scanFenFromMemory(void) {
+    vm_address_t addr = 0;
+    vm_size_t size = 0;
+    natural_t depth = 0;
 
-static UIImage *captureScreen(void) {
-    if ([NSThread isMainThread]) return captureScreenImpl();
-    __block UIImage *img = nil;
-    dispatch_sync(dispatch_get_main_queue(), ^{ img = captureScreenImpl(); });
-    return img;
-}
+    NSString *bestFen = nil;
+    int bestSteps = -1;
 
-static BOOL loadModel(void) {
-    NSString *docPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
-    NSString *tmpPath = [NSHomeDirectory() stringByAppendingPathComponent:@"tmp"];
-    NSString *packagePath = [docPath stringByAppendingPathComponent:@"XiangqiDetector.mlpackage"];
-    NSString *compiledPath = [docPath stringByAppendingPathComponent:@"XiangqiDetector.mlmodelc"];
-    NSURL *compiledURL = [NSURL fileURLWithPath:compiledPath];
-    
-    NSError *err = nil;
-    
-    if (![[NSFileManager defaultManager] fileExistsAtPath:compiledPath]) {
-        writeLog(@"首次加载，准备编译模型...");
-        if (![[NSFileManager defaultManager] fileExistsAtPath:packagePath]) {
-            writeLog(@"mlpackage 不存在！");
-            return NO;
-        }
-        NSString *tmpPackagePath = [tmpPath stringByAppendingPathComponent:@"XiangqiDetector.mlpackage"];
-        [[NSFileManager defaultManager] removeItemAtPath:tmpPackagePath error:nil];
-        if (![[NSFileManager defaultManager] copyItemAtPath:packagePath toPath:tmpPackagePath error:&err]) {
-            writeLog([NSString stringWithFormat:@"拷贝到 tmp 失败: %@", err.localizedDescription]);
-            return NO;
-        }
-        NSURL *tmpPackageURL = [NSURL fileURLWithPath:tmpPackagePath];
-        NSURL *compiled = [MLModel compileModelAtURL:tmpPackageURL error:&err];
-        if (err || !compiled) {
-            writeLog([NSString stringWithFormat:@"编译失败: %@", err.localizedDescription]);
-            return NO;
-        }
-        [[NSFileManager defaultManager] removeItemAtURL:compiledURL error:nil];
-        if (![[NSFileManager defaultManager] moveItemAtURL:compiled toURL:compiledURL error:&err]) {
-            writeLog([NSString stringWithFormat:@"移动失败: %@", err.localizedDescription]);
-            return NO;
-        }
-        [[NSFileManager defaultManager] removeItemAtPath:tmpPackagePath error:nil];
-        writeLog(@"编译完成");
-    }
-    
-    MLModelConfiguration *cfg = [[MLModelConfiguration alloc] init];
-    cfg.computeUnits = MLComputeUnitsCPUOnly;
-    
-    MLModel *m = [MLModel modelWithContentsOfURL:compiledURL configuration:cfg error:&err];
-    if (err || !m) {
-        writeLog([NSString stringWithFormat:@"模型加载失败: %@", err.localizedDescription]);
-        return NO;
-    }
-    gModel = m;
-    writeLog(@"模型加载成功");
-    return YES;
-}
+    const char *needle = "rnbakabnr";
+    size_t needleLen = 9;
 
-static MLMultiArray *imageToMultiArray(UIImage *image, int width, int height) {
-    NSError *err = nil;
-    MLMultiArray *arr = [[MLMultiArray alloc] initWithShape:@[@1, @3, @(height), @(width)]
-                                                   dataType:MLMultiArrayDataTypeFloat32
-                                                      error:&err];
-    if (err || !arr) return nil;
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    uint8_t *raw = (uint8_t *)calloc(width * height * 4, 1);
-    CGContextRef ctx = CGBitmapContextCreate(raw, width, height, 8, width * 4, cs, kCGImageAlphaPremultipliedLast);
-    CGColorSpaceRelease(cs);
-    if (!ctx) { free(raw); return nil; }
-    CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), image.CGImage);
-    float *dst = (float *)arr.dataPointer;
-    int planeSize = width * height;
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            int srcIdx = (y * width + x) * 4;
-            int dstIdx = y * width + x;
-            dst[0 * planeSize + dstIdx] = raw[srcIdx + 0] / 255.0f;
-            dst[1 * planeSize + dstIdx] = raw[srcIdx + 1] / 255.0f;
-            dst[2 * planeSize + dstIdx] = raw[srcIdx + 2] / 255.0f;
-        }
-    }
-    CGContextRelease(ctx);
-    free(raw);
-    return arr;
-}
+    int regionsScanned = 0;
 
-typedef struct {
-    float cx, cy, w, h;
-    float conf;
-    int cls;
-} DetBox;
-
-static void parseYOLO(MLMultiArray *out, float confThresh, DetBox *results, int *count, int maxCount) {
-    float *data = (float *)out.dataPointer;
-    int N = 25200;
-    int C = 20;
-    *count = 0;
-    for (int i = 0; i < N; i++) {
-        float *row = data + i * C;
-        float conf = row[4];
-        if (conf < confThresh) continue;
-        int bestCls = 0;
-        float bestScore = row[5];
-        for (int c = 1; c < 15; c++) {
-            if (row[5 + c] > bestScore) { bestScore = row[5 + c]; bestCls = c; }
-        }
-        if (bestScore < confThresh) continue;
-        if (*count >= maxCount) break;
-        DetBox b;
-        b.cx = row[0]; b.cy = row[1]; b.w = row[2]; b.h = row[3];
-        b.conf = conf; b.cls = bestCls;
-        results[*count] = b;
-        (*count)++;
-    }
-}
-
-static float iou(DetBox a, DetBox b) {
-    float ax1 = a.cx - a.w/2, ay1 = a.cy - a.h/2;
-    float ax2 = a.cx + a.w/2, ay2 = a.cy + a.h/2;
-    float bx1 = b.cx - b.w/2, by1 = b.cy - b.h/2;
-    float bx2 = b.cx + b.w/2, by2 = b.cy + b.h/2;
-    float ix1 = fmaxf(ax1, bx1), iy1 = fmaxf(ay1, by1);
-    float ix2 = fminf(ax2, bx2), iy2 = fminf(ay2, by2);
-    float iw = fmaxf(0, ix2 - ix1), ih = fmaxf(0, iy2 - iy1);
-    float inter = iw * ih;
-    float uni = a.w * a.h + b.w * b.h - inter;
-    if (uni <= 0) return 0;
-    return inter / uni;
-}
-
-static int nms(DetBox *boxes, int count, float iouThresh, DetBox *out) {
-    int *used = (int *)calloc(count, sizeof(int));
-    int outCount = 0;
     while (1) {
-        int best = -1;
-        float bestConf = -1;
-        for (int i = 0; i < count; i++) {
-            if (used[i]) continue;
-            if (boxes[i].conf > bestConf) { bestConf = boxes[i].conf; best = i; }
+        struct vm_region_submap_info_64 info;
+        mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
+
+        kern_return_t kr = vm_region_recurse_64(
+            mach_task_self(), &addr, &size, &depth,
+            (vm_region_info_t)&info, &count
+        );
+        if (kr != KERN_SUCCESS) break;
+
+        if ((info.protection & VM_PROT_READ) && (info.protection & VM_PROT_WRITE) && size < 200 * 1024 * 1024) {
+            vm_offset_t data = 0;
+            mach_msg_type_number_t dataSize = 0;
+
+            kr = vm_read(mach_task_self(), addr, size, &data, &dataSize);
+            if (kr == KERN_SUCCESS && data && dataSize > 0) {
+                regionsScanned++;
+                char *base = (char *)data;
+                char *p = base;
+                char *end = base + dataSize;
+
+                while (p && p < end) {
+                    void *found = memmem(p, end - p, needle, needleLen);
+                    if (!found) break;
+
+                    char *fp = (char *)found;
+                    char *nul = memchr(fp, 0, end - fp);
+                    size_t len = nul ? (size_t)(nul - fp) : (size_t)(end - fp);
+
+                    if (len > 20 && len < 2000) {
+                        char *buf = (char *)malloc(len + 1);
+                        if (buf) {
+                            memcpy(buf, fp, len);
+                            buf[len] = 0;
+
+                            NSString *s = [NSString stringWithUTF8String:buf];
+                            free(buf);
+
+                            if (s) {
+                                NSRange movesRange = [s rangeOfString:@"moves"];
+                                if (movesRange.location != NSNotFound) {
+                                    NSString *after = [s substringFromIndex:movesRange.location + 5];
+                                    NSArray *tokens = [after componentsSeparatedByString:@" "];
+                                    int steps = 0;
+                                    for (NSString *t in tokens) {
+                                        if (t.length == 4) {
+                                            unichar c0 = [t characterAtIndex:0];
+                                            unichar c1 = [t characterAtIndex:1];
+                                            unichar c2 = [t characterAtIndex:2];
+                                            unichar c3 = [t characterAtIndex:3];
+                                            if (c0 >= 'a' && c0 <= 'i' && c1 >= '0' && c1 <= '9' &&
+                                                c2 >= 'a' && c2 <= 'i' && c3 >= '0' && c3 <= '9') {
+                                                steps++;
+                                            }
+                                        }
+                                    }
+                                    if (steps > bestSteps) {
+                                        bestSteps = steps;
+                                        bestFen = s;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    p = (char *)found + needleLen;
+                }
+
+                vm_deallocate(mach_task_self(), data, dataSize);
+            }
         }
-        if (best < 0) break;
-        used[best] = 1;
-        out[outCount++] = boxes[best];
-        for (int i = 0; i < count; i++) {
-            if (used[i]) continue;
-            if (boxes[i].cls != boxes[best].cls) continue;
-            if (iou(boxes[i], boxes[best]) > iouThresh) used[i] = 1;
+
+        addr += size;
+        if (addr == 0 || size == 0) break;
+    }
+
+    writeLog([NSString stringWithFormat:@"扫描了 %d 个区域", regionsScanned]);
+
+    if (!bestFen) return nil;
+
+    // 清理：截断到 moves 后面最后一个走法
+    NSRange movesRange = [bestFen rangeOfString:@"moves"];
+    if (movesRange.location == NSNotFound) return nil;
+
+    NSString *head = [bestFen substringToIndex:movesRange.location];
+    NSString *after = [bestFen substringFromIndex:movesRange.location + 5];
+    NSArray *tokens = [after componentsSeparatedByString:@" "];
+    NSMutableArray *validMoves = [NSMutableArray array];
+    for (NSString *t in tokens) {
+        if (t.length == 4) {
+            unichar c0 = [t characterAtIndex:0];
+            unichar c1 = [t characterAtIndex:1];
+            unichar c2 = [t characterAtIndex:2];
+            unichar c3 = [t characterAtIndex:3];
+            if (c0 >= 'a' && c0 <= 'i' && c1 >= '0' && c1 <= '9' &&
+                c2 >= 'a' && c2 <= 'i' && c3 >= '0' && c3 <= '9') {
+                [validMoves addObject:t];
+            }
         }
     }
-    free(used);
-    return outCount;
+
+    return [NSString stringWithFormat:@"%@moves %@", head, [validMoves componentsJoinedByString:@" "]];
 }
 
+// ========== 主逻辑：扫描 FEN + 引擎分析 ==========
 static void runInference(void) {
-    writeLog(@"=== 开始推理 ===");
-    if (!loadModel()) return;
-    if (!gModel) { writeLog(@"gModel 为空"); return; }
-    
-    UIImage *image = captureScreen();
-    if (!image) { writeLog(@"截图失败"); return; }
-    writeLog(@"截图完成");
-    
-    int W = 640, H = 640;
-    UIGraphicsBeginImageContextWithOptions(CGSizeMake(W, H), NO, 1.0);
-    [image drawInRect:CGRectMake(0, 0, W, H)];
-    UIImage *resized = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    
-    MLMultiArray *input = imageToMultiArray(resized, W, H);
-    if (!input) { writeLog(@"输入构造失败"); return; }
-    
-    NSError *err = nil;
-    NSString *inputName = gModel.modelDescription.inputDescriptionsByName.allKeys.firstObject;
-    MLDictionaryFeatureProvider *provider = [[MLDictionaryFeatureProvider alloc]
-        initWithDictionary:@{inputName: input} error:&err];
-    if (err || !provider) { writeLog(@"provider 失败"); return; }
-    
-    id<MLFeatureProvider> output = [gModel predictionFromFeatures:provider error:&err];
-    if (err || !output) { writeLog(@"推理失败"); return; }
-    
-    MLFeatureValue *v = [output featureValueForName:output.featureNames.allObjects.firstObject];
-    MLMultiArray *outArr = v.multiArrayValue;
-    
-    DetBox *raw = (DetBox *)calloc(5000, sizeof(DetBox));
-    int rawCount = 0;
-    parseYOLO(outArr, 0.3, raw, &rawCount, 5000);
-    
-    DetBox *nmsOut = (DetBox *)calloc(5000, sizeof(DetBox));
-    int nmsCount = nms(raw, rawCount, 0.6, nmsOut);
-    writeLog([NSString stringWithFormat:@"NMS 后: %d", nmsCount]);
-    
-    float bx0 = 37,  bx1 = 600;
-    float by0 = 179, by1 = 459;
-    
-    const char *classChar[15] = {
-        "n", "b", "k", "a", "r", "c", "p",
-        "R", "N", "B", "K", "A", "C", "P", "?"
-    };
-    
-    char board[10][9];
-    for (int r = 0; r < 10; r++)
-        for (int c = 0; c < 9; c++)
-            board[r][c] = '.';
-    
-    DetBox *finalBoxes = (DetBox *)calloc(5000, sizeof(DetBox));
-    int finalCount = 0;
-    for (int i = 0; i < nmsCount; i++) {
-        DetBox b = nmsOut[i];
-        float fx = (b.cx - bx0) / (bx1 - bx0);
-        float fy = (b.cy - by0) / (by1 - by0);
-        int col = (int)roundf(fx * 8);
-        int row = (int)roundf(fy * 9);
-        if (col < 0 || col > 8 || row < 0 || row > 9) continue;
-        
-        BOOL occupied = NO;
-        for (int j = 0; j < finalCount; j++) {
-            float fx2 = (finalBoxes[j].cx - bx0) / (bx1 - bx0);
-            float fy2 = (finalBoxes[j].cy - by0) / (by1 - by0);
-            int c2 = (int)roundf(fx2 * 8);
-            int r2 = (int)roundf(fy2 * 9);
-            if (c2 == col && r2 == row) {
-                if (b.conf > finalBoxes[j].conf) finalBoxes[j] = b;
-                occupied = YES;
-                break;
-            }
-        }
-        if (!occupied) finalBoxes[finalCount++] = b;
+    writeLog(@"=== 开始扫描 ===");
+
+    NSDate *t0 = [NSDate date];
+    NSString *fen = scanFenFromMemory();
+    NSTimeInterval dt = -[t0 timeIntervalSinceNow];
+    writeLog([NSString stringWithFormat:@"扫描耗时: %.2f 秒", dt]);
+
+    if (!fen || fen.length == 0) {
+        writeLog(@"未找到 FEN");
+        return;
     }
-    
-    for (int i = 0; i < finalCount; i++) {
-        DetBox b = finalBoxes[i];
-        float fx = (b.cx - bx0) / (bx1 - bx0);
-        float fy = (b.cy - by0) / (by1 - by0);
-        int col = (int)roundf(fx * 8);
-        int row = (int)roundf(fy * 9);
-        if (col < 0 || col > 8 || row < 0 || row > 9) continue;
-        char ch = classChar[b.cls][0];
-        if (ch == '?') continue;
-        if (board[row][col] == '.') board[row][col] = ch;
-    }
-    
-    char stdBoard[10][9] = {
-        {'r','n','b','a','k','a','b','n','r'},
-        {'.','.','.','.','.','.','.','.','.'},
-        {'.','c','.','.','.','.','.','c','.'},
-        {'p','.','p','.','p','.','p','.','p'},
-        {'.','.','.','.','.','.','.','.','.'},
-        {'.','.','.','.','.','.','.','.','.'},
-        {'P','.','P','.','P','.','P','.','P'},
-        {'.','C','.','.','.','.','.','C','.'},
-        {'.','.','.','.','.','.','.','.','.'},
-        {'R','N','B','A','K','A','B','N','R'},
-    };
-    
-    for (int r = 0; r < 10; r++) {
-        for (int c = 0; c < 9; c++) {
-            if (stdBoard[r][c] == '.') {
-                board[r][c] = '.';
-            } else {
-                board[r][c] = stdBoard[r][c];
-            }
-        }
-    }
-    
-    writeLog(@"=== 识别棋盘 ===");
-    writeLog(@"   0 1 2 3 4 5 6 7 8");
-    for (int r = 0; r < 10; r++) {
-        NSMutableString *line = [NSMutableString stringWithFormat:@"%2d ", r];
-        for (int c = 0; c < 9; c++) {
-            [line appendFormat:@"%c ", board[r][c]];
-        }
-        writeLog(line);
-    }
-    
-    NSMutableString *fen = [NSMutableString string];
-    for (int r = 0; r < 10; r++) {
-        int empty = 0;
-        for (int c = 0; c < 9; c++) {
-            if (board[r][c] == '.') {
-                empty++;
-            } else {
-                if (empty > 0) { [fen appendFormat:@"%d", empty]; empty = 0; }
-                [fen appendFormat:@"%c", board[r][c]];
-            }
-        }
-        if (empty > 0) [fen appendFormat:@"%d", empty];
-        if (r < 9) [fen appendString:@"/"];
-    }
-    [fen appendString:@" w"];
     writeLog([NSString stringWithFormat:@"FEN: %@", fen]);
-    
-    // ===== 调用皮卡鱼引擎 =====
+
+    NSDate *t1 = [NSDate date];
     const char *bm = pf_bestmove([fen UTF8String], 1000);
-    writeLog([NSString stringWithFormat:@"引擎建议: %s", bm]);
-    
-    free(raw); free(nmsOut); free(finalBoxes);
+    NSTimeInterval dt2 = -[t1 timeIntervalSinceNow];
+    writeLog([NSString stringWithFormat:@"引擎耗时: %.2f 秒", dt2]);
+
+    if (bm) {
+        writeLog([NSString stringWithFormat:@"引擎建议: %s", bm]);
+    } else {
+        writeLog(@"引擎无返回");
+    }
 }
 
+// ========== UI ==========
 static UIView *panel = nil;
+static UILabel *resultLabel = nil;
 
 @interface XQController : NSObject
 - (void)onDetect:(UIButton *)sender;
@@ -345,9 +190,17 @@ static UIView *panel = nil;
 @implementation XQController
 - (void)onDetect:(UIButton *)sender {
     [sender setTitle:@"识别中..." forState:UIControlStateNormal];
-    dispatch_async(dispatch_get_main_queue(), ^{
+    [sender setEnabled:NO];
+    resultLabel.text = @"扫描中...";
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         runInference();
-        [sender setTitle:@"识别" forState:UIControlStateNormal];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [sender setTitle:@"识别" forState:UIControlStateNormal];
+            [sender setEnabled:YES];
+            resultLabel.text = @"结果写日志";
+        });
     });
 }
 @end
@@ -359,9 +212,11 @@ static void createPanel(void) {
     if (!ctl) ctl = [[XQController alloc] init];
     UIWindow *window = getAnyWindow();
     if (!window) return;
-    panel = [[UIView alloc] initWithFrame:CGRectMake(window.bounds.size.width - 200, 120, 180, 90)];
+
+    panel = [[UIView alloc] initWithFrame:CGRectMake(window.bounds.size.width - 200, 120, 180, 110)];
     panel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.85];
     panel.layer.cornerRadius = 10;
+
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
     btn.frame = CGRectMake(10, 10, 160, 40);
     [btn setTitle:@"识别" forState:UIControlStateNormal];
@@ -370,11 +225,14 @@ static void createPanel(void) {
     btn.layer.cornerRadius = 8;
     [btn addTarget:ctl action:@selector(onDetect:) forControlEvents:UIControlEventTouchUpInside];
     [panel addSubview:btn];
-    UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(10, 55, 160, 30)];
-    tip.text = @"结果写日志";
-    tip.textColor = [UIColor whiteColor];
-    tip.font = [UIFont systemFontOfSize:11];
-    [panel addSubview:tip];
+
+    resultLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 55, 160, 45)];
+    resultLabel.text = @"结果写日志";
+    resultLabel.numberOfLines = 2;
+    resultLabel.textColor = [UIColor whiteColor];
+    resultLabel.font = [UIFont systemFontOfSize:11];
+    [panel addSubview:resultLabel];
+
     [window addSubview:panel];
 }
 
