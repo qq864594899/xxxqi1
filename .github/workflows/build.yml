@@ -33,7 +33,8 @@ jobs:
           echo "CLANGXX = $CLANGXX"
           make -j4 build ARCH=armv8 COMP=clang \
             CXX="$CLANGXX -arch arm64 -isysroot $SDK -mios-version-min=15.0" \
-            CXXFLAGS="-std=c++17 -O3 -DNDEBUG -DIS_64BIT -DUSE_POPCNT -DUSE_NEON=8 -DARCH=armv8 -flto -funroll-loops -mdynamic-no-pic"
+            CXXFLAGS="-std=c++17 -O3 -DNDEBUG -DIS_64BIT -DUSE_POPCNT -DUSE_NEON=8 -DARCH=armv8 -flto -funroll-loops -mdynamic-no-pic" \
+            LDFLAGS="-arch arm64 -isysroot $SDK -mios-version-min=15.0 -lpthread"
           ls -la pikafish
           file pikafish
 
