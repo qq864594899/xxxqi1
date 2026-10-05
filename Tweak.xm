@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 static BOOL started = NO;
-extern char **environ;
+
 // ========== 日志 ==========
 static void writeLog(NSString *msg) {
     NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/xiangqi_log.txt"];
@@ -78,7 +78,6 @@ static NSString *scanFenFromMemory(void) {
                     if (!found) break;
 
                     char *fp = (char *)found;
-            
                     char *nul = (char *)memchr(fp, 0, end - fp);
                     size_t len = nul ? (size_t)(nul - fp) : (size_t)(end - fp);
 
@@ -155,7 +154,7 @@ static NSString *scanFenFromMemory(void) {
     return [NSString stringWithFormat:@"%@moves %@", head, [validMoves componentsJoinedByString:@" "]];
 }
 
-// ========== 调用皮卡鱼（posix_spawn） ==========
+// ========== 调用皮卡鱼 ==========
 static NSString *runPikafish(NSString *fen, int movetimeMs) {
     NSString *binPath = @"/var/mobile/xiangqiassist/pikafish";
     NSString *nnuePath = @"/var/mobile/xiangqiassist/pikafish.nnue";
@@ -178,7 +177,7 @@ static NSString *runPikafish(NSString *fen, int movetimeMs) {
 
     pid_t pid = 0;
     const char *argv[] = { [binPath UTF8String], NULL };
-    int ret = posix_spawn(&pid, [binPath UTF8String], &actions, NULL, (char *const *)argv, environ);
+    int ret = posix_spawn(&pid, [binPath UTF8String], &actions, NULL, (char *const *)argv, NULL);
     posix_spawn_file_actions_destroy(&actions);
 
     if (ret != 0) {
@@ -317,13 +316,8 @@ static void createPanel(void) {
     [window addSubview:panel];
 }
 
-%hook UIViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    if (started) return;
-    started = YES;
+%ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         createPanel();
     });
 }
-%end
