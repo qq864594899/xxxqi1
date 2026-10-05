@@ -1,12 +1,59 @@
-- name: Build Pikafish for iOS arm64
-  run: |
-    cd /tmp/Pikafish/src
-    SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-    CLANGXX=$(xcrun -sdk iphoneos -f clang++)
-    echo "SDK = $SDK"
-    echo "CLANGXX = $CLANGXX"
-    make -j4 build ARCH=armv8 COMP=clang \
-      CXX="$CLANGXX -arch arm64 -isysroot $SDK -mios-version-min=15.0" \
-      CXXFLAGS="-std=c++17 -O3 -DNDEBUG -DIS_64BIT -DUSE_POPCNT -DUSE_NEON=8 -DARCH=armv8 -flto -funroll-loops -mdynamic-no-pic"
-    ls -la pikafish
-    file pikafish
+name: Build Tweak
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Theos
+        uses: Randomblock1/theos-action@v1
+
+      - name: Clone Pikafish
+        run: |
+          git clone --depth 1 https://github.com/official-pikafish/Pikafish.git /tmp/Pikafish
+
+      - name: Download NNUE
+        run: |
+          cd /tmp/Pikafish/src
+          curl -L -o pikafish.nnue https://github.com/official-pikafish/Networks/releases/download/master-net/pikafish.nnue
+          ls -la pikafish.nnue
+
+      - name: Build Pikafish for iOS arm64
+        run: |
+          cd /tmp/Pikafish/src
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          CLANGXX=$(xcrun -sdk iphoneos -f clang++)
+          echo "SDK = $SDK"
+          echo "CLANGXX = $CLANGXX"
+          make -j4 build ARCH=armv8 COMP=clang \
+            CXX="$CLANGXX -arch arm64 -isysroot $SDK -mios-version-min=15.0" \
+            CXXFLAGS="-std=c++17 -O3 -DNDEBUG -DIS_64BIT -DUSE_POPCNT -DUSE_NEON=8 -DARCH=armv8 -flto -funroll-loops -mdynamic-no-pic"
+          ls -la pikafish
+          file pikafish
+
+      - name: Copy binaries into layout
+        run: |
+          mkdir -p layout/var/mobile/xiangqiassist
+          cp /tmp/Pikafish/src/pikafish layout/var/mobile/xiangqiassist/
+          cp /tmp/Pikafish/src/pikafish.nnue layout/var/mobile/xiangqiassist/
+          chmod +x layout/var/mobile/xiangqiassist/pikafish
+          echo "=== layout 目录 ==="
+          find layout -type f
+
+      - name: Build Tweak
+        run: |
+          make package THEOS_PACKAGE_SCHEME=rootless
+          echo "=== deb 内容 ==="
+          dpkg-deb -c packages/*.deb | grep xiangqiassist || echo "!!! deb 里没有 xiangqiassist !!!"
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: tweak-deb
+          path: packages/*.deb
