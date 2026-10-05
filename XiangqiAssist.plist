@@ -1,7 +1,3 @@
-{
-    Filter = {
-        Bundles = (
-            "com.tencent.xiangqi"
-        );
-    };
-}
+
+
+{ Filter = { Bundles = ( "cn.jj.chinachess" ); }; }
