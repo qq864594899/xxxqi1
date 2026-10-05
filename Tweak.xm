@@ -156,7 +156,7 @@ static NSString *scanFenFromMemory(void) {
 // ========== 调用皮卡鱼 ==========
 static NSString *runPikafish(NSString *fen, int movetimeMs) {
     NSString *binPath = @"/var/mobile/xiangqiassist/pikafish";
-    NSString *nnuePath = @"/var/mobile/xiangqiassist/pikafish.nnue";
+    NSString *nnuePath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/pikafish.nnue"];
 
     if (![[NSFileManager defaultManager] fileExistsAtPath:binPath]) {
         return @"引擎不存在";
